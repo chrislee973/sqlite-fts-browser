@@ -10,7 +10,7 @@ The data source we use here is a sqlite database I pregenerated of the transcrip
 
    ```bash
    git clone https://github.com/chrislee973/sqlite-fts-browser.git
-   cd sqlite-fts-browser/public
+   cd sqlite-fts-browser/public # cd to the public folder where our code lives!
    ```
 
 2. Serve the files using a local web server. For example, using Python:
