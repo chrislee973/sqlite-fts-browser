@@ -25,4 +25,4 @@ The data source we use here is a sqlite database I pregenerated of the transcrip
    http://localhost:8000
    ```
 
-Note: You must serve the files through a web server rather than opening the HTML file directly, due to browser security restrictions when loading the SQL.js WASM module.
+Note: You must serve the files through a web server rather than opening the HTML file directly in your filesytem, due to browser security restrictions when loading the SQL.js WASM module. Also, the code is in the `public` folder because we're deploying to Vercel as a static site and Vercel expects static assets to be in the public folder.
