@@ -131,14 +131,14 @@
       <a target="_blank" href="https://www.sqlite.org/fts5.html"
         >full-text search</a
       >
-      on a SQLite database in the browser using a custom build of
+      on a SQLite database in the browser using a custom FTS5-enabled build of
       <a target="_blank" href="https://github.com/chrislee973/sql.js">sql.js</a>
-      with FTS5 enabled. The transcript display and search functionality is all
-      done via sql queries running in your browser.
+      . Because the full-text search is all done via sql queries running locally
+      in your browser, the search results are executed in under 5 milliseconds.
     </p>
     <p>
-      On page load, it downloads a pregenerated SQLite database of the
-      transcript of this YouTube video:
+      The data source we use here is a pregenerated SQLite database of the
+      transcript for this YouTube video:
       <a target="_blank" href="https://www.youtube.com/watch?v=-nckO_vl2_U"
         >https://www.youtube.com/watch?v=-nckO_vl2_U</a
       >
