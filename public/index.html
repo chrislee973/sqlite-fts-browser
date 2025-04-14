@@ -126,19 +126,21 @@
   </head>
   <body>
     <h1>SQLite FTS In The Browser</h1>
+    <a target="_blank" href="https://github.com/chrislee973/sqlite-fts-browser"
+      >Github</a
+    >
     <p>
       This is a proof of concept running
       <a target="_blank" href="https://www.sqlite.org/fts5.html"
         >full-text search</a
       >
-      on a SQLite database in the browser using a custom FTS5-enabled build of
+      on a SQLite database in the browser. It uses a custom build of
       <a target="_blank" href="https://github.com/chrislee973/sql.js">sql.js</a>
-      . Because the full-text search is all done via sql queries running locally
-      in your browser, the search results are executed in under 5 milliseconds.
+      that has FTS5 enabled.
     </p>
     <p>
-      The data source we use here is a pregenerated SQLite database of the
-      transcript for this YouTube video:
+      The data source we use here is a SQLite database of the transcript for
+      this YouTube video:
       <a target="_blank" href="https://www.youtube.com/watch?v=-nckO_vl2_U"
         >https://www.youtube.com/watch?v=-nckO_vl2_U</a
       >
@@ -229,23 +231,51 @@
           if (!searchTerm.trim()) {
             // If search is empty, show all utterances
             results = db.exec(`
-              SELECT id, text, speaker, start_ms, end_ms 
-              FROM utterances 
+              SELECT id, text, speaker, start_ms, end_ms
+              FROM utterances
               ORDER BY start_ms ASC
             `);
             searchStatusEl.textContent = "";
             executionTimeEl.textContent = "";
           } else {
             // Use FTS to search with prefix matching
-            const escapedTerm =
-              '"' + searchTerm.trim().replace(/"/g, '""') + '"';
+            function isBalancedQuote(str) {
+              return (
+                str.startsWith('"') && str.endsWith('"') && str.length >= 2
+              );
+            }
+
+            function sanitizeFtsQuery(input) {
+              const rawInput = input.trim();
+
+              if (isBalancedQuote(rawInput)) {
+                // Exact phrase match
+                const phrase = rawInput.slice(1, -1).replace(/"/g, '""');
+                return `"${phrase}"`;
+              } else {
+                // Prefix-last logic
+                const terms = rawInput
+                  .split(/\s+/)
+                  .map((t) => t.replace(/"/g, '""'));
+                if (terms.length === 0) {
+                  return "";
+                } else if (terms.length === 1) {
+                  return `${terms[0]}*`;
+                } else {
+                  const last = terms.pop();
+                  return [...terms, `${last}*`].join(" ");
+                }
+              }
+            }
+
+            const ftsQuery = sanitizeFtsQuery(searchTerm);
             results = db.exec(`
-              SELECT u.id, highlight(utterances_fts, 0, '<span class="highlight">', '</span>') as text, 
-                     u.speaker, u.start_ms, u.end_ms
+              SELECT u.id, highlight(utterances_fts, 0, '<span class="highlight">', '</span>') AS text,
+                    u.speaker, u.start_ms, u.end_ms
               FROM utterances u
               JOIN utterances_fts f ON u.id = f.rowid
-              WHERE utterances_fts MATCH ${escapedTerm} || '*'
-              ORDER BY u.start_ms ASC
+              WHERE utterances_fts MATCH '${ftsQuery}'
+              ORDER BY u.start_ms ASC;
             `);
           }
 
@@ -355,8 +385,8 @@
 
           // Query all utterances, ordered by start time
           const results = db.exec(`
-            SELECT id, text, speaker, start_ms, end_ms 
-            FROM utterances 
+            SELECT id, text, speaker, start_ms, end_ms
+            FROM utterances
             ORDER BY start_ms ASC
           `);
 
