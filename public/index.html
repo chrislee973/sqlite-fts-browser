@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SQLite FTS In The Browser</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+      }
+
+      .video-container {
+        position: relative;
+        padding-bottom: 56.25%; /* 16:9 aspect ratio */
+        height: 0;
+        overflow: hidden;
+        margin-bottom: 20px;
+      }
+
+      .video-container iframe {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        border: none;
+      }
+
+      #transcript-container {
+        border: 1px solid #e0e0e0;
+        border-radius: 5px;
+        padding: 15px;
+        margin-top: 20px;
+        max-height: 500px;
+        overflow-y: auto;
+      }
+
+      .utterance {
+        margin-bottom: 15px;
+        cursor: pointer;
+        padding: 8px;
+        border-radius: 4px;
+        transition: background-color 0.2s;
+      }
+
+      .utterance:hover {
+        background-color: #f5f5f5;
+      }
+
+      .utterance.current {
+        background-color: #e7f3ff;
+      }
+
+      .speaker {
+        font-weight: bold;
+        margin-bottom: 4px;
+      }
+
+      .text {
+        line-height: 1.4;
+      }
+
+      .timestamp {
+        color: #666;
+        font-size: 0.8em;
+        margin-left: 5px;
+      }
+
+      .loading {
+        text-align: center;
+        padding: 20px;
+        font-style: italic;
+        color: #666;
+      }
+
+      .error {
+        background-color: #ffe7e7;
+        padding: 10px;
+        border-left: 4px solid #c00000;
+        margin: 10px 0;
+      }
+
+      /* Search styling */
+      .search-container {
+        position: sticky;
+        top: 0;
+        background: white;
+        padding: 10px 0;
+        border-bottom: 1px solid #e0e0e0;
+        z-index: 100;
+      }
+
+      #search-input {
+        width: 100%;
+        padding: 8px 12px;
+        font-size: 16px;
+        border: 2px solid #e0e0e0;
+        border-radius: 4px;
+        outline: none;
+      }
+
+      #search-input:focus {
+        border-color: #2196f3;
+      }
+
+      .search-status {
+        color: #666;
+        font-size: 14px;
+        margin: 8px 0;
+      }
+
+      .execution-time {
+        color: #666;
+        font-size: 12px;
+        font-style: italic;
+      }
+
+      .highlight {
+        background-color: #ffeb3b;
+        padding: 2px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>SQLite FTS In The Browser</h1>
+    <p>
+      This is a proof of concept running
+      <a target="_blank" href="https://www.sqlite.org/fts5.html"
+        >full-text search</a
+      >
+      on a SQLite database in the browser using a custom build of
+      <a target="_blank" href="https://github.com/chrislee973/sql.js">sql.js</a>
+      with FTS5 enabled. The transcript display and search functionality is all
+      done via sql queries running in your browser.
+    </p>
+    <p>
+      On page load, it downloads a pregenerated SQLite database of the
+      transcript of this YouTube video:
+      <a target="_blank" href="https://www.youtube.com/watch?v=-nckO_vl2_U"
+        >https://www.youtube.com/watch?v=-nckO_vl2_U</a
+      >
+      . Try out a search below!
+    </p>
+
+    <div class="video-container">
+      <iframe
+        id="player"
+        width="560"
+        height="315"
+        src="https://www.youtube.com/embed/-nckO_vl2_U?si=qG83M5gn-mJKPIZT&enablejsapi=1"
+        title="YouTube video player"
+        frameborder="0"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+        referrerpolicy="strict-origin-when-cross-origin"
+        allowfullscreen
+      ></iframe>
+    </div>
+
+    <div id="status">Loading database...</div>
+
+    <input type="text" id="search-input" placeholder="Search transcript..." />
+    <div id="search-status" class="search-status"></div>
+    <div id="execution-time" class="execution-time"></div>
+
+    <div id="transcript-container" style="display: none">
+      <!-- Transcript utterances will be loaded here -->
+    </div>
+
+    <!-- Load YouTube iframe API -->
+    <script src="https://www.youtube.com/iframe_api"></script>
+
+    <!-- Load SQLite.js -->
+    <script src="/sql-wasm.js"></script>
+    <script>
+      // YouTube player reference
+      let player;
+      let db;
+      let utterances = [];
+
+      // Initialize YouTube player
+      function onYouTubeIframeAPIReady() {
+        player = new YT.Player("player", {
+          events: {
+            onReady: onPlayerReady,
+            onStateChange: onPlayerStateChange,
+          },
+        });
+      }
+
+      function onPlayerReady(event) {
+        console.log("YouTube player is ready");
+      }
+
+      function onPlayerStateChange(event) {
+        // Will handle player state changes later
+      }
+
+      // Function to seek to a specific time in the video
+      function seekToTime(timeInMs) {
+        if (player && player.seekTo) {
+          // Convert milliseconds to seconds for YouTube API
+          const timeInSeconds = timeInMs / 1000;
+          player.seekTo(timeInSeconds, true);
+        }
+      }
+
+      // Format timestamp (ms) to readable time (MM:SS)
+      function formatTimestamp(ms) {
+        const totalSeconds = Math.floor(ms / 1000);
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        return `${minutes.toString().padStart(2, "0")}:${seconds
+          .toString()
+          .padStart(2, "0")}`;
+      }
+
+      // Function to perform search
+      function performSearch(searchTerm) {
+        if (!db) return;
+        const searchStatusEl = document.getElementById("search-status");
+        const executionTimeEl = document.getElementById("execution-time");
+        const startTime = performance.now();
+
+        try {
+          let results;
+          if (!searchTerm.trim()) {
+            // If search is empty, show all utterances
+            results = db.exec(`
+              SELECT id, text, speaker, start_ms, end_ms 
+              FROM utterances 
+              ORDER BY start_ms ASC
+            `);
+            searchStatusEl.textContent = "";
+            executionTimeEl.textContent = "";
+          } else {
+            // Use FTS to search with prefix matching
+            const escapedTerm =
+              '"' + searchTerm.trim().replace(/"/g, '""') + '"';
+            results = db.exec(`
+              SELECT u.id, highlight(utterances_fts, 0, '<span class="highlight">', '</span>') as text, 
+                     u.speaker, u.start_ms, u.end_ms
+              FROM utterances u
+              JOIN utterances_fts f ON u.id = f.rowid
+              WHERE utterances_fts MATCH ${escapedTerm} || '*'
+              ORDER BY u.start_ms ASC
+            `);
+          }
+
+          const endTime = performance.now();
+          const executionTime = Math.round(endTime - startTime);
+
+          if (results.length > 0) {
+            const searchResults = results[0].values.map((row) => {
+              const obj = {};
+              results[0].columns.forEach((col, i) => {
+                obj[col] = row[i];
+              });
+              return obj;
+            });
+
+            // Update search status if there was a search term
+            if (searchTerm.trim()) {
+              searchStatusEl.textContent = `${
+                searchResults.length
+              } results for "${searchTerm.trim()}"`;
+              executionTimeEl.textContent = `Query execution time: ${executionTime}ms`;
+            }
+
+            displayTranscript(searchResults, searchTerm);
+          } else {
+            const container = document.getElementById("transcript-container");
+            container.innerHTML =
+              '<div class="error">No matching results found</div>';
+            if (searchTerm.trim()) {
+              searchStatusEl.textContent = `0 results for "${searchTerm.trim()}"`;
+              executionTimeEl.textContent = `Query execution time: ${executionTime}ms`;
+            }
+          }
+        } catch (err) {
+          console.error("Search error:", err);
+          document.getElementById(
+            "status"
+          ).innerHTML = `<div class="error">Error performing search: ${err.message}</div>`;
+          executionTimeEl.textContent = "";
+        }
+      }
+
+      // Create and display the transcript UI
+      function displayTranscript(utterances, searchTerm = "") {
+        const container = document.getElementById("transcript-container");
+        let innerHTML = "";
+
+        utterances.forEach((utterance) => {
+          innerHTML += `
+            <div class="utterance" data-start-ms="${
+              utterance.start_ms
+            }" data-end-ms="${utterance.end_ms}">
+              <div class="speaker">
+                ${utterance.speaker}
+                <span class="timestamp">${formatTimestamp(
+                  utterance.start_ms
+                )}</span>
+              </div>
+              <div class="text">
+                ${utterance.text}
+              </div>
+            </div>
+          `;
+        });
+
+        container.innerHTML = innerHTML;
+        container.style.display = "block";
+
+        // Clear loading status
+        document.getElementById("status").textContent = "";
+
+        // Add click handlers for utterances
+        document.querySelectorAll(".utterance").forEach((utteranceDiv) => {
+          utteranceDiv.addEventListener("click", function () {
+            seekToTime(parseInt(this.dataset.startMs));
+            document.querySelectorAll(".utterance.current").forEach((el) => {
+              el.classList.remove("current");
+            });
+            this.classList.add("current");
+          });
+        });
+      }
+
+      // Load and process the database
+      async function loadDatabase() {
+        try {
+          const statusElement = document.getElementById("status");
+          statusElement.textContent = "Loading database...";
+
+          // Initialize SQL.js
+          const SQL = await initSqlJs({
+            locateFile: (filename) => "/" + filename,
+          });
+
+          // Fetch the database file
+          const response = await fetch("/creatorsupport.db");
+          if (!response.ok) {
+            throw new Error(
+              `Failed to fetch database: ${response.status} ${response.statusText}`
+            );
+          }
+
+          const arrayBuffer = await response.arrayBuffer();
+
+          // Create a database instance from the file
+          db = new SQL.Database(new Uint8Array(arrayBuffer));
+
+          // Query all utterances, ordered by start time
+          const results = db.exec(`
+            SELECT id, text, speaker, start_ms, end_ms 
+            FROM utterances 
+            ORDER BY start_ms ASC
+          `);
+
+          if (results.length > 0) {
+            // Convert to array of objects
+            utterances = results[0].values.map((row) => {
+              const obj = {};
+              results[0].columns.forEach((col, i) => {
+                obj[col] = row[i];
+              });
+              return obj;
+            });
+
+            // Display the transcript
+            displayTranscript(utterances);
+
+            // Add search handler once at initialization
+            document
+              .getElementById("search-input")
+              .addEventListener("input", (e) => {
+                performSearch(e.target.value);
+              });
+          } else {
+            throw new Error("No utterances found in the database");
+          }
+        } catch (err) {
+          console.error("Database error:", err);
+          const statusElement = document.getElementById("status");
+          statusElement.innerHTML = `<div class="error">Error loading transcript: ${err.message}</div>`;
+        }
+      }
+
+      // Initialize the application
+      document.addEventListener("DOMContentLoaded", function () {
+        console.log("Transcript viewer initialized");
+        loadDatabase();
+      });
+    </script>
+  </body>
+</html>
